@@ -6,7 +6,7 @@
 #include <LiquidCrystal.h>
 #include <Time.h>
 
-const int disarmPin = 13;
+
 
 /*  Inicializa a Interface de LCD
  *  Listagem dos Pinos Utilizados:
@@ -96,22 +96,42 @@ byte customChars[8][8] = {
   }
 };
 
-unsigned int lastRefresh = 0;
+const int disarmPin = 2;
+unsigned int disarmTime = 17;
 unsigned int bombTime = 1800;
-unsigned int gameEnd = now() + bombTime;
+unsigned int bombDisarmed = 0;
+unsigned int bombExploded = now() + bombTime;
+
 
 void setup() {
+
+  // Setup Interrupts
+  cli();//stop interrupts
+  //set timer1 interrupt at 1Hz
+  TCCR1A = 0;// set entire TCCR1A register to 0
+  TCCR1B = 0;// same for TCCR1B
+  TCNT1  = 0;//initialize counter value to 0
+  // set compare match register for 1hz increments
+  OCR1A = 15624;// = (16*10^6) / (1*1024) - 1 (must be <65536)
+  // turn on CTC mode
+  TCCR1B |= (1 << WGM12);
+  // Set CS10 and CS12 bits for 1024 prescaler
+  TCCR1B |= (1 << CS12) | (1 << CS10);
+  // enable timer compare interrupt
+  TIMSK1 |= (1 << OCIE1A);
+  sei();
+
   // Cria cada bloco de matriz como um char personalizado para formar os números
   for (int i = 0; i < 8; i++) {
     lcd.createChar(i, customChars[i]);
   }
   lcd.begin(20, 4);
   Serial.begin(9600);
-  pinMode(disarmPin, INPUT);
-  attachInterrupt(0, disarm, RISING);
+  pinMode(disarmPin, OUTPUT);
+  attachInterrupt(0, defuse, CHANGE);
 }
 
-void customNumber(int num, int col, int row) {
+void drawNumber(int num, int col, int row) {
   lcd.setCursor(col, row);
   switch (num) {
     case 0:
@@ -206,36 +226,52 @@ void customNumber(int num, int col, int row) {
   }
 }
 
-void customDot(int col, int row) {
+void drawDot(int col, int row) {
   lcd.setCursor(col, row);
   lcd.write(4);
   lcd.setCursor(col, row + 1);
   lcd.write(4);
 }
 
-void refreshTimer() {
-  if (lastRefresh != now()) {
-    lastRefresh = now();
-    unsigned int timer = gameEnd - lastRefresh;
-    customNumber(minute(timer) / 10, 2, 0);
-    customNumber(minute(timer) % 10, 5, 0);
-    customDot(9, 0);
-    customNumber(second(timer) / 10, 11, 0);
-    customNumber(second(timer) % 10, 14, 0);
+void drawClock(unsigned int clockTime) {
+  drawNumber(minute(clockTime) / 10, 2, 0);
+  drawNumber(minute(clockTime) % 10, 5, 0);
+  drawDot(9, 0);
+  drawNumber(second(clockTime) / 10, 11, 0);
+  drawNumber(second(clockTime) % 10, 14, 0);
+  if (digitalRead(disarmPin)) {
+    unsigned int disarmprogress = bombDisarmed - now();    
+    lcd.setCursor(disarmprogress,3);
+    lcd.write(7);
   }
 }
 
-void disarm() {
-  unsigned int disarmStarted = now();
-  while (digitalRead(disarmPin)) {
-    refreshTimer();
+void defuse() {
+  if (digitalRead(disarmPin)) {
+    bombDisarmed = now() + disarmTime;
+    lcd.setCursor(3, 2);
+    lcd.print("Desarmando: ");
+    lcd.setCursor(0, 3);
+    lcd.print('[');
+    lcd.setCursor(19, 3);
+    lcd.print(']');
+  } else {
+    bombDisarmed = 0;
+    lcd.setCursor(0, 2);
+    lcd.print("                    ");
+    lcd.setCursor(0, 3);
+    lcd.print("                    ");
   }
 }
 
-void loop()
-{
-  refreshTimer();
-  Serial.println(gameEnd);
-  Serial.println(lastRefresh);
-  Serial.println(now());
+ISR(TIMER1_COMPA_vect) {
+  unsigned int timer = bombExploded - now();
+  if (timer == 0) {
+  } else {
+    drawClock(timer);
+  }
+}
+
+void loop() {
+  //digitalWrite(disarmPin, HIGH);
 }
